@@ -48,7 +48,7 @@ async def upload_resume(
             status_code=400,
             detail=f"Invalid file type. Allowed: {', '.join(allowed_extensions)}"
         )
-    
+
     # Validate file size
     max_size = int(os.getenv("MAX_UPLOAD_SIZE", "10485760"))  # 10MB
     file_content = await file.read()
@@ -57,30 +57,27 @@ async def upload_resume(
             status_code=400,
             detail=f"File too large. Maximum size: {max_size // (1024*1024)}MB"
         )
-    
+
     # Save file
-    storage_path = f"uploads/resumes/{user['id']}/{file.filename}"
+    storage_path = f"resumes/{user['id']}/{file.filename}"
     upload_dir = Path(settings.UPLOAD_DIR)
     upload_dir.mkdir(parents=True, exist_ok=True)
     file_path = upload_dir / storage_path.lstrip("/")
     file_path.parent.mkdir(parents=True, exist_ok=True)
-    
+
     with open(file_path, "wb") as f:
         f.write(file_content)
-    
+
     # Extract text based on file type
     extracted_text = ""
     try:
-        if file_ext == ".pdf":
-            extracted_text = resume_service.extract_text_pdf(file_content, file.filename)
-        elif file_ext == ".docx":
-            extracted_text = resume_service.extract_text_docx(file_content, file.filename)
+        extracted_text = resume_service.extract_resume_text(file_content, file.filename)
     except ValueError as e:
         # Clean up uploaded file on extraction failure
         if file_path.exists():
             file_path.unlink()
         raise HTTPException(status_code=400, detail=str(e))
-    
+
     # Create resume record
     resume = Resume(
         user_id=user["id"],
@@ -91,7 +88,7 @@ async def upload_resume(
     db.add(resume)
     db.commit()
     db.refresh(resume)
-    
+
     return resume
 
 
@@ -103,7 +100,7 @@ async def get_resume(
 ):
     """Get a specific resume by ID (ownership validated)."""
     resume = db.query(Resume).filter(
-        Resume.id == resume_id, 
+        Resume.id == resume_id,
         Resume.user_id == user["id"]
     ).first()
     if not resume:
@@ -119,17 +116,17 @@ async def delete_resume(
 ):
     """Delete a resume and its associated analysis."""
     resume = db.query(Resume).filter(
-        Resume.id == resume_id, 
+        Resume.id == resume_id,
         Resume.user_id == user["id"]
     ).first()
     if not resume:
         raise HTTPException(status_code=404, detail="Resume not found")
-    
+
     # Delete associated analyses
     db.query(ResumeAnalysis).filter(ResumeAnalysis.resume_id == resume_id).delete()
     db.delete(resume)
     db.commit()
-    
+
     # Delete physical file
     if resume.storage_path:
         try:
@@ -138,7 +135,7 @@ async def delete_resume(
                 file_path.unlink()
         except Exception:
             pass  # File may already be deleted
-    
+
     return {"message": "Resume deleted successfully"}
 
 
@@ -152,12 +149,12 @@ async def analyze_resume(
     """Analyze a resume using Gemini AI and save the results."""
     # Verify resume ownership
     resume = db.query(Resume).filter(
-        Resume.id == resume_id, 
+        Resume.id == resume_id,
         Resume.user_id == user["id"]
     ).first()
     if not resume:
         raise HTTPException(status_code=404, detail="Resume not found")
-    
+
     # Check if already analyzed
     existing = db.query(ResumeAnalysis).filter(
         ResumeAnalysis.resume_id == resume_id,
@@ -165,7 +162,7 @@ async def analyze_resume(
     ).first()
     if existing:
         return existing
-    
+
     # Extract text if not already extracted
     extracted_text = resume.extracted_text
     if not extracted_text or not extracted_text.strip():
@@ -173,44 +170,44 @@ async def analyze_resume(
         file_ext = os.path.splitext(resume.original_filename)[1].lower()
         try:
             if file_ext == ".pdf":
-                extracted_text = resume_service.extract_text_pdf(
-                    b"", resume.original_filename  # Would need actual file data
+                extracted_text = resume_service.extract_resume_text_from_file(
+                    str(file_path), file_ext
                 )
             elif file_ext == ".docx":
-                extracted_text = resume_service.extract_text_docx(
-                    b"", resume.original_filename
+                extracted_text = resume_service.extract_resume_text_from_file(
+                    str(file_path), file_ext
                 )
         except Exception:
             extracted_text = ""
-    
+
     if not extracted_text or not extracted_text.strip():
         raise HTTPException(
             status_code=400,
             detail="No extractable text found in resume. The file may be encrypted, scanned, or corrupted."
         )
-    
+
     # Analyze with Gemini
     try:
-        analysis = resume_service.analyze(extracted_text)
+        analysis = resume_service.analyze_resume(extracted_text)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=f"AI analysis failed: {str(e)}")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"AI analysis error: {str(e)}")
-    
+
     # Save analysis to database
     analysis_record = ResumeAnalysis(
         user_id=user["id"],
         resume_id=resume_id,
-        overall_score=analysis.get("overall_score"),
-        strengths=analysis.get("strengths", []),
-        weaknesses=analysis.get("weaknesses", []),
-        identified_skills=analysis.get("identified_skills", []),
-        missing_skills=analysis.get("missing_skills", []),
-        improvement_suggestions=analysis.get("improvement_suggestions", []),
-        analysis_json=analysis.get("analysis_json", {}),
+        overall_score=analysis.overall_score,
+        strengths=strengths if isinstance(strengths, list) else [],
+        weaknesses=weaknesses if isinstance(weaknesses, list) else [],
+        identified_skills=identified_skills if isinstance(identified_skills, list) else [],
+        missing_skills=missing_skills if isinstance(missing_skills, list) else [],
+        improvement_suggestions=improvement_suggestions if isinstance(improvement_suggestions, list) else [],
+        analysis_json=analysis_json if isinstance(analysis_json, dict) else {},
     )
     db.add(analysis_record)
     db.commit()
     db.refresh(analysis_record)
-    
+
     return analysis_record
