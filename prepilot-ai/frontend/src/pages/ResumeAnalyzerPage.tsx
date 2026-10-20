@@ -1,6 +1,11 @@
 import React, { useEffect, useState } from "react";
 import { Loader2, Upload, FileText, Folder, LogOut } from "lucide-react";
+
+// Import Supabase from the configured lib file
 import { supabase } from "../lib/supabase";
+
+// API base URL from environment - no hardcoded localhost
+const API_BASE_URL = process.env.VITE_API_BASE_URL || "http://localhost:8000";
 
 interface ResumeUploadResponse {
   id: number;
@@ -25,21 +30,32 @@ const ResumeAnalyzerPage: React.FC<ResumeAnalyzerPageProps> = () => {
     filename: "",
     extractedText: "",
     analysis: null,
+    resumeId: null as number | null,
   });
   const [uploadStatus, setUploadStatus] = useState<{
     status: "idle" | "uploading" | "analyzing" | "success" | "error";
     message: string;
   }>({ status: "idle", message: "" });
 
-  const [recentResumes, setRecentResumes] = useState<ResumeUploadResponse[]>([]);
+  const [recentResumes, setRecentResumes] = useState<
+    ResumeUploadResponse[]
+  >([]);
 
   useEffect(() => {
     // Load recent resumes when component mounts
     const loadRecentResumes = async () => {
       try {
+        // Use auth.getUser instead of direct table access for secure data access
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) {
+          setRecentResumes([]);
+          return;
+        }
+
         const { data, error } = await supabase
           .from("resumes")
           .select("*")
+          .eq("user_id", user.id)
           .order("created_at", { ascending: false })
           .limit(5);
 
@@ -47,6 +63,7 @@ const ResumeAnalyzerPage: React.FC<ResumeAnalyzerPageProps> = () => {
         setRecentResumes(data || []);
       } catch (err) {
         console.error("Failed to load recent resumes:", err);
+        setRecentResumes([]);
       }
     };
 
@@ -54,7 +71,7 @@ const ResumeAnalyzerPage: React.FC<ResumeAnalyzerPageProps> = () => {
   }, []);
 
   const handleFileChange = async (
-    e: React.ChangeEvent<HTMLInputElement>
+    e: React.ChangeEvent<HTMLInputElement>,
   ) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -87,23 +104,19 @@ const ResumeAnalyzerPage: React.FC<ResumeAnalyzerPageProps> = () => {
         return;
       }
 
-      // Create FormData for file upload
+      // Create FormData - let browser generate multipart boundary automatically
       const formData = new FormData();
       formData.append("file", file, file.name);
 
-      // Upload to FastAPI endpoint
-      const response = await fetch(
-        "http://localhost:8000/v1/resumes/upload",
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${session.access_token}`,
-            // Prevent browser from setting content-type for FormData
-            "Content-Type": "multipart/form-data",
-          },
-          body: formData,
-        }
-      );
+      // Upload to FastAPI endpoint - NO manual Content-Type for FormData
+      const response = await fetch(`${API_BASE_URL}/v1/resumes/upload`, {
+        method: "POST",
+        headers: {
+          // Only include auth token; let browser set content-type boundary
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: formData,
+      });
 
       if (!response.ok) {
         const errorData = await response.json();
@@ -115,12 +128,14 @@ const ResumeAnalyzerPage: React.FC<ResumeAnalyzerPageProps> = () => {
         filename: uploadedResume.original_filename,
         extractedText: uploadedResume.extracted_text || "",
         analysis: null,
+        resumeId: uploadedResume.id,
       });
 
       // Refresh recent resumes list
       const { data } = await supabase
         .from("resumes")
         .select("*")
+        .eq("user_id", (await supabase.auth.getUser()).data?.user?.id || "")
         .order("created_at", { ascending: false })
         .limit(5);
       setRecentResumes(data || []);
@@ -134,9 +149,9 @@ const ResumeAnalyzerPage: React.FC<ResumeAnalyzerPageProps> = () => {
       setIsLoading(true);
       setUploadStatus({ status: "analyzing", message: "Analyzing resume with Gemini AI..." });
 
-      // Call the analyze endpoint
+      // Call the analyze endpoint with the actual resume ID
       const analyzeResponse = await fetch(
-        `http://localhost:8000/v1/resumes/${uploadedResume.id}/analyze`,
+        `${API_BASE_URL}/v1/resumes/${uploadedResume.id}/analyze`,
         {
           method: "POST",
           headers: {
@@ -172,7 +187,6 @@ const ResumeAnalyzerPage: React.FC<ResumeAnalyzerPageProps> = () => {
           message: "Resume uploaded and analyzed successfully!",
         });
       }
-
     } catch (err: any) {
       console.error("Upload error:", err);
       setError(err.message || "Upload failed");
@@ -202,17 +216,14 @@ const ResumeAnalyzerPage: React.FC<ResumeAnalyzerPageProps> = () => {
         return;
       }
 
-      const response = await fetch(
-        "http://localhost:8000/v1/resumes/analyze",
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${session.access_token}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ resume_id: resume.filename ? 0 : 0 }),
-        }
-      );
+      const response = await fetch(`${API_BASE_URL}/v1/resumes/analyze`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ resume_id: resume.resumeId }),
+      });
 
       if (!response.ok) {
         const errorData = await response.json();
@@ -253,15 +264,12 @@ const ResumeAnalyzerPage: React.FC<ResumeAnalyzerPageProps> = () => {
       const { data: { session} } = await supabase.auth.getSession();
       if (!session) return;
 
-      const response = await fetch(
-        `http://localhost:8000/v1/resumes/${resumeId}`,
-        {
-          method: "DELETE",
-          headers: {
-            Authorization: `Bearer ${session.access_token}`,
-          },
-        }
-      );
+      const response = await fetch(`${API_BASE_URL}/v1/resumes/${resumeId}`, {
+        method: "DELETE",
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+        },
+      });
 
       if (!response.ok) {
         const errorData = await response.json();
@@ -272,16 +280,18 @@ const ResumeAnalyzerPage: React.FC<ResumeAnalyzerPageProps> = () => {
       const { data } = await supabase
         .from("resumes")
         .select("*")
+        .eq("user_id", (await supabase.auth.getUser()).data?.user?.id || "")
         .order("created_at", { ascending: false })
         .limit(5);
       setRecentResumes(data || []);
 
       // If deleting the currently viewed resume, reset state
-      if (resume.filename && /* could check ID match */ true) {
+      if (resume.resumeId === resumeId) {
         setResume({
           filename: "",
           extractedText: "",
           analysis: null,
+          resumeId: null,
         });
       }
 
@@ -378,15 +388,15 @@ const ResumeAnalyzerPage: React.FC<ResumeAnalyzerPageProps> = () => {
                 </p>
                 <ul className="list-disc list-inside space-y-1 text-fg-secondary text-sm">
                   <li>
-                    Strengths:{" "}
+                    Strengths: {" "}
                     {resume.analysis.strengths?.join(", ") || "None identified"}
                   </li>
                   <li>
-                    Missing Skills:{" "}
+                    Missing Skills: {" "}
                     {resume.analysis.missing_skills?.join(", ") || "None identified"}
                   </li>
                   <li>
-                    Improvement Suggestions:{" "}
+                    Improvement Suggestions: {" "}
                     {resume.analysis.improvement_suggestions?.join(", ") || "None provided"}
                   </li>
                 </ul>

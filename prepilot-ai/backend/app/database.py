@@ -17,16 +17,28 @@ from sqlalchemy.orm import sessionmaker, Session
 from datetime import datetime, timezone
 
 # Database URL from environment
+# In Freebuff Sites, env.DB binding takes precedence; falls back to DATABASE_URL env var
+# If neither is set, use a default SQLite file for development
 DATABASE_URL = os.getenv("DATABASE_URL", "")
 
-# Create engine with appropriate settings
-engine = create_engine(
-    DATABASE_URL,
-    pool_pre_ping=True,
-    pool_size=5,
-    max_overflow=10,
-    echo=os.getenv("SQL_ECHO", "false").lower() == "true",
-)
+if DATABASE_URL:
+    engine = create_engine(
+        DATABASE_URL,
+        pool_pre_ping=True,
+        pool_size=5,
+        max_overflow=10,
+        echo=os.getenv("SQL_ECHO", "false").lower() == "true",
+    )
+else:
+    # No DATABASE_URL set - use SQLite file for development
+    # In Freebuff Sites production, env.DB binding is used directly in route handlers
+    engine = create_engine(
+        "sqlite:///./dev.db",
+        pool_pre_ping=True,
+        pool_size=5,
+        max_overflow=10,
+        echo=os.getenv("SQL_ECHO", "false").lower() == "true",
+    )
 
 # Create session local
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -53,7 +65,7 @@ def get_current_timestamp() -> datetime:
 class Profile(Base):
     __tablename__ = "profiles"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=lambda: str(uuid4()))
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     full_name = Column(String, nullable=True)
     email = Column(String, unique=True, nullable=False)
     target_role = Column(String, nullable=True)
@@ -87,12 +99,12 @@ class ResumeAnalysis(Base):
     user_id = Column(UUID(as_uuid=True), nullable=False)
     resume_id = Column(Integer, nullable=True)
     overall_score = Column(Integer, nullable=True)
-    strengths = Column(JSON, nullable=True, default={})
-    weaknesses = Column(JSON, nullable=True, default={})
-    identified_skills = Column(JSON, nullable=True, default={})
-    missing_skills = Column(JSON, nullable=True, default={})
-    improvement_suggestions = Column(JSON, nullable=True, default={})
-    analysis_json = Column(JSON, nullable=True, default={})
+    strengths = Column(JSON, nullable=True, default_factory=list)
+    weaknesses = Column(JSON, nullable=True, default_factory=list)
+    identified_skills = Column(JSON, nullable=True, default_factory=list)
+    missing_skills = Column(JSON, nullable=True, default_factory=list)
+    improvement_suggestions = Column(JSON, nullable=True, default_factory=list)
+    analysis_json = Column(JSON, nullable=True, default_factory=list)
     created_at = Column(DateTime(timezone=True), default=get_current_timestamp, nullable=False)
 
 
@@ -105,12 +117,12 @@ class JobAnalysis(Base):
     job_title = Column(String, nullable=True)
     company_name = Column(String, nullable=True)
     job_description = Column(Text, nullable=False)
-    required_skills = Column(JSON, nullable=True, default={})
-    preferred_skills = Column(JSON, nullable=True, default={})
-    matched_skills = Column(JSON, nullable=True, default={})
-    missing_skills = Column(JSON, nullable=True, default={})
-    recommendations = Column(JSON, nullable=True, default={})
-    analysis_json = Column(JSON, nullable=True, default={})
+    required_skills = Column(JSON, nullable=True, default_factory=list)
+    preferred_skills = Column(JSON, nullable=True, default_factory=list)
+    matched_skills = Column(JSON, nullable=True, default_factory=list)
+    missing_skills = Column(JSON, nullable=True, default_factory=list)
+    recommendations = Column(JSON, nullable=True, default_factory=list)
+    analysis_json = Column(JSON, nullable=True, default_factory=list)
     created_at = Column(DateTime(timezone=True), default=get_current_timestamp, nullable=False)
 
 
@@ -123,10 +135,10 @@ class JobMatch(Base):
     resume_id = Column(Integer, nullable=True)
     job_analysis_id = Column(Integer, nullable=True)
     compatibility_score = Column(Integer, nullable=True)
-    matched_skills = Column(JSON, nullable=True, default={})
-    missing_skills = Column(JSON, nullable=True, default={})
-    recommendations = Column(JSON, nullable=True, default={})
-    match_json = Column(JSON, nullable=True, default={})
+    matched_skills = Column(JSON, nullable=True, default_factory=list)
+    missing_skills = Column(JSON, nullable=True, default_factory=list)
+    recommendations = Column(JSON, nullable=True, default_factory=list)
+    match_json = Column(JSON, nullable=True, default_factory=list)
     created_at = Column(DateTime(timezone=True), default=get_current_timestamp, nullable=False)
 
 
@@ -161,7 +173,7 @@ class InterviewQuestion(Base):
     user_id = Column(UUID(as_uuid=True), nullable=False)
     question_text = Column(Text, nullable=False)
     question_type = Column(String, nullable=True)
-    expected_topics = Column(JSON, nullable=True, default={})
+    expected_topics = Column(JSON, nullable=True, default_factory=list)
     question_order = Column(Integer, nullable=False, default=0)
     created_at = Column(DateTime(timezone=True), default=get_current_timestamp, nullable=False)
 
@@ -193,7 +205,7 @@ class PracticeQuestion(Base):
     topic = Column(String, nullable=False)
     difficulty = Column(String, nullable=True)
     question_text = Column(Text, nullable=False)
-    question_data = Column(JSON, nullable=True, default={})
+    question_data = Column(JSON, nullable=True, default_factory=list)
     created_at = Column(DateTime(timezone=True), default=get_current_timestamp, nullable=False)
 
 
@@ -220,5 +232,5 @@ class CodingSubmission(Base):
     programming_language = Column(String, nullable=False)
     problem_statement = Column(Text, nullable=False)
     submitted_code = Column(Text, nullable=False)
-    review_json = Column(JSON, nullable=True, default={})
+    review_json = Column(JSON, nullable=True, default_factory=list)
     created_at = Column(DateTime(timezone=True), default=get_current_timestamp, nullable=False)

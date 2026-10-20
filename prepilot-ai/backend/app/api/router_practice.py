@@ -1,13 +1,16 @@
 import json
 import os
+from datetime import datetime
 from fastapi import APIRouter, Body, Depends, HTTPException
 from sqlalchemy.orm import Session
 from typing import List, Optional
 
 from app.core.schemas import (
-    PracticeQuestionCreate, PracticeQuestionResponse,
-    PracticeAttemptCreate, PracticeAttemptResponse,
-    ApiResponse
+    PracticeQuestionCreate,
+    PracticeQuestionResponse,
+    PracticeAttemptCreate,
+    PracticeAttemptResponse,
+    ApiResponse,
 )
 from app.core.auth import get_current_user
 from app.database import get_db, PracticeQuestion, PracticeAttempt
@@ -17,7 +20,7 @@ router = APIRouter(prefix="/v1/practice", tags=["practice"])
 
 practice_service = TechnicalPracticeService(
     api_key=os.getenv("GEMINI_API_KEY", ""),
-    model=os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
+    model=os.getenv("GEMINI_MODEL", "gemini-1.5-flash"),
 )
 
 
@@ -41,7 +44,7 @@ async def generate_practice_question(
     db.add(question)
     db.commit()
     db.refresh(question)
-    
+
     # Generate question content with Gemini
     try:
         generated = practice_service.generate_question(
@@ -51,20 +54,20 @@ async def generate_practice_question(
             experience_level=experience_level,
             focus_areas=focus_areas,
         )
-        
+
         # Update the question with generated content
-        question_data_json = json.loads(json.dumps(generated.get("question_data", {})))
+        question.question_text = generated.get("question_text", "")
         question.question_data = generated
         db.commit()
         db.refresh(question)
-        
+
         return {
             "id": question.id,
             "user_id": user["id"],
             "topic": question.topic,
             "difficulty": question.difficulty,
             "question_text": generated.get("question_text", ""),
-            "question_data": question_data_json,
+            "question_data": generated.get("question_data", {}),
             "hint": generated.get("hint", ""),
             "difficulty": generated.get("difficulty", difficulty),
             "topic": generated.get("topic", topic),
@@ -76,7 +79,7 @@ async def generate_practice_question(
         db.commit()
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to generate question: {str(e)}"
+            detail=f"Failed to generate question: {str(e)}",
         )
 
 
@@ -90,36 +93,35 @@ async def submit_practice_attempt(
     # Get the practice question
     question = db.query(PracticeQuestion).filter(
         PracticeQuestion.id == attempt_data.practice_question_id,
-        PracticeQuestion.user_id == user["id"]
+        PracticeQuestion.user_id == user["id"],
     ).first()
     if not question:
         raise HTTPException(status_code=404, detail="Practice question not found")
-    
+
     # Get feedback from Gemini
     try:
         explanation = practice_service.get_explanation(
             question_text=question.question_text,
             question_data=question.question_data or {},
-            solution=question.question_data.get("solution", {}) if question.question_data else {},
-            language=language or "Python",
+            language=question.question_data.get("language", "Python") if question.question_data else "Python",
         )
     except Exception as e:
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to get explanation: {str(e)}"
+            detail=f"Failed to get explanation: {str(e)}",
         )
-    
+
     # Create practice attempt record
     attempt = PracticeAttempt(
         user_id=user["id"],
         practice_question_id=attempt_data.practice_question_id,
         answer_text=attempt_data.answer_text,
         feedback=explanation.get("feedback", "No feedback available"),
-        score=explanation.get("overall_score"),  # May need to extract from feedback
+        score=explanation.get("overall_score"),
         completed_at=datetime.now(),
     )
     db.add(attempt)
     db.commit()
     db.refresh(attempt)
-    
+
     return attempt

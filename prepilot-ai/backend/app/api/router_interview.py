@@ -1,16 +1,24 @@
 import json
+import logging
 import os
+from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlalchemy.orm import Session
 from typing import List, Optional
 
 from app.core.schemas import (
-    InterviewSessionCreate, InterviewSessionUpdate, InterviewSessionResponse,
-    InterviewQuestionCreate, InterviewQuestionResponse,
-    InterviewAnswerCreate, InterviewAnswerResponse,
-    PracticeQuestionCreate, PracticeQuestionResponse,
-    PracticeAttemptCreate, PracticeAttemptResponse,
-    ApiResponse
+    InterviewSessionCreate,
+    InterviewSessionUpdate,
+    InterviewSessionResponse,
+    InterviewQuestionCreate,
+    InterviewQuestionResponse,
+    InterviewAnswerCreate,
+    InterviewAnswerResponse,
+    PracticeQuestionCreate,
+    PracticeQuestionResponse,
+    PracticeAttemptCreate,
+    PracticeAttemptResponse,
+    ApiResponse,
 )
 from app.core.auth import get_current_user
 from app.database import get_db, InterviewSession, InterviewQuestion, InterviewAnswer
@@ -20,8 +28,10 @@ router = APIRouter(prefix="/v1/interviews", tags=["interviews"])
 
 interview_service = MockInterviewService(
     api_key=os.getenv("GEMINI_API_KEY", ""),
-    model=os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
+    model=os.getenv("GEMINI_MODEL", "gemini-1.5-flash"),
 )
+
+logger = logging.getLogger(__name__)
 
 
 @router.post("/", response_model=InterviewSessionResponse, summary="Create new interview session")
@@ -30,7 +40,7 @@ async def create_interview_session(
     user: dict = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Create a new mock interview session."""
+    """Create a new interview session."""
     session = InterviewSession(
         user_id=user["id"],
         interview_type=session_data.interview_type,
@@ -42,7 +52,7 @@ async def create_interview_session(
     db.add(session)
     db.commit()
     db.refresh(session)
-    
+
     # Generate initial questions
     try:
         questions = interview_service.generate_questions(
@@ -51,7 +61,7 @@ async def create_interview_session(
             difficulty=session_data.difficulty or "mid",
             experience_level=session_data.experience_level or "junior",
         )
-        
+
         # Save questions to database
         for i, q in enumerate(questions):
             question = InterviewQuestion(
@@ -67,7 +77,7 @@ async def create_interview_session(
     except Exception as e:
         # Still create the session, just without questions initially
         logger.warning(f"Failed to generate initial questions: {e}")
-    
+
     return session
 
 
@@ -80,7 +90,7 @@ async def list_interview_sessions(
 ):
     """List all interview sessions belonging to the current user."""
     sessions = db.query(InterviewSession).filter(
-        InterviewSession.user_id == user["id"]
+        InterviewSession.user_id == user["id"],
     ).offset(skip).limit(limit).all()
     return sessions
 
@@ -94,7 +104,7 @@ async def get_interview_session(
     """Get a specific interview session by ID."""
     session = db.query(InterviewSession).filter(
         InterviewSession.id == session_id,
-        InterviewSession.user_id == user["id"]
+        InterviewSession.user_id == user["id"],
     ).first()
     if not session:
         raise HTTPException(status_code=404, detail="Interview session not found")
@@ -111,28 +121,28 @@ async def get_next_question(
     # Get session
     session = db.query(InterviewSession).filter(
         InterviewSession.id == session_id,
-        InterviewSession.user_id == user["id"]
+        InterviewSession.user_id == user["id"],
     ).first()
     if not session:
         raise HTTPException(status_code=404, detail="Interview session not found")
-    
+
     # Get unanswered questions
     asked_question_ids = db.query(InterviewAnswer.question_id).filter(
         InterviewAnswer.session_id == session_id
     ).subquery()
-    
+
     next_question = db.query(InterviewQuestion).filter(
         InterviewQuestion.session_id == session_id,
-        ~InterviewQuestion.id.in_(asked_question_ids)
+        ~InterviewQuestion.id.in_(asked_question_ids),
     ).order_by(InterviewQuestion.question_order.asc()).first()
-    
+
     if not next_question:
         # Interview complete
         session.status = "completed"
         session.completed_at = datetime.now()
         db.commit()
         return {"message": "Interview complete", "session": session}
-    
+
     return {
         "question": {
             "id": next_question.id,
@@ -156,11 +166,11 @@ async def submit_answer(
     # Verify question belongs to session
     question = db.query(InterviewQuestion).filter(
         InterviewQuestion.id == question_id,
-        InterviewQuestion.session_id == session_id
+        InterviewQuestion.session_id == session_id,
     ).first()
     if not question:
         raise HTTPException(status_code=404, detail="Question not found")
-    
+
     # Evaluate answer with Gemini
     try:
         evaluation = interview_service.evaluate_answer(
@@ -175,7 +185,7 @@ async def submit_answer(
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"AI evaluation error: {str(e)}")
-    
+
     # Save answer to database
     answer = InterviewAnswer(
         session_id=session_id,
@@ -190,15 +200,15 @@ async def submit_answer(
         suggested_answer=evaluation.get("suggested_answer"),
     )
     db.add(answer)
-    
+
     # Update session score tracking
     session.total_questions = db.query(InterviewAnswer).filter(
-        InterviewAnswer.session_id == session_id
+        InterviewAnswer.session_id == session_id,
     ).count()
-    
+
     db.commit()
     db.refresh(answer)
-    
+
     return answer
 
 
@@ -211,36 +221,36 @@ async def complete_interview_session(
     """Finalize an interview session and generate report."""
     session = db.query(InterviewSession).filter(
         InterviewSession.id == session_id,
-        InterviewSession.user_id == user["id"]
+        InterviewSession.user_id == user["id"],
     ).first()
     if not session:
         raise HTTPException(status_code=404, detail="Interview session not found")
-    
+
     # Calculate overall score
     answers = db.query(InterviewAnswer).filter(
-        InterviewAnswer.session_id == session_id
+        InterviewAnswer.session_id == session_id,
     ).all()
-    
+
     if answers:
         total_score = sum(
-            (a.relevance_score or 0) + (a.technical_accuracy_score or 0) + 
-            (a.communication_score or 0) + (a.completeness_score or 0)
+            (a.relevance_score or 0) + (a.technical_accuracy_score or 0)
+            + (a.communication_score or 0) + (a.completeness_score or 0)
         ) / (len(answers) * 4)
         session.overall_score = round(total_score, 2)
-    
+
     session.status = "completed"
     session.completed_at = datetime.now()
     db.commit()
     db.refresh(session)
-    
+
     # Generate report
     all_questions = db.query(InterviewQuestion).filter(
-        InterviewQuestion.session_id == session_id
+        InterviewQuestion.session_id == session_id,
     ).all()
     all_answers = db.query(InterviewAnswer).filter(
-        InterviewAnswer.session_id == session_id
+        InterviewAnswer.session_id == session_id,
     ).all()
-    
+
     question_texts = [q.question_text for q in all_questions]
     answer_texts = [a.answer_text or "" for a in all_answers]
     scores = [
@@ -252,28 +262,30 @@ async def complete_interview_session(
         }
         for a in all_answers
     ]
-    
+
     try:
         report = interview_service.generate_report(
             interview_type=session.interview_type,
             target_role=session.target_role or "",
             difficulty=session.difficulty or "mid",
             experience_level=session.experience_level or "junior",
-            questions=[{
-                "question_text": q.question_text,
-                "question_type": q.question_type,
-                "expected_topics": q.expected_topics or [],
-            } for q in all_questions],
+            questions=[
+                {
+                    "question_text": q.question_text,
+                    "question_type": q.question_type,
+                    "expected_topics": q.expected_topics or [],
+                }
+                for q in all_questions
+            ],
             answers=answer_texts,
             scores=scores,
             summary=session.summary or "",
         )
-        
         session.summary = str(report.get("overall_score", 0))  # Store summary field
         db.commit()
     except Exception as e:
         logger.warning(f"Failed to generate interview report: {e}")
-    
+
     return session
 
 
@@ -286,32 +298,34 @@ async def get_interview_report(
     """Get the interview report for a completed session."""
     session = db.query(InterviewSession).filter(
         InterviewSession.id == session_id,
-        InterviewSession.user_id == user["id"]
+        InterviewSession.user_id == user["id"],
     ).first()
     if not session:
         raise HTTPException(status_code=404, detail="Interview session not found")
-    
+
     # Get all questions and answers
     all_questions = db.query(InterviewQuestion).filter(
-        InterviewQuestion.session_id == session_id
+        InterviewQuestion.session_id == session_id,
     ).all()
     all_answers = db.query(InterviewAnswer).filter(
-        InterviewAnswer.session_id == session_id
+        InterviewAnswer.session_id == session_id,
     ).all()
-    
+
     question_texts = [q.question_text for q in all_questions]
     answer_texts = [a.answer_text or "" for a in all_answers]
-    
+
     # Get scores
     scores = []
     for a in all_answers:
-        scores.append({
-            "relevance_score": a.relevance_score,
-            "technical_accuracy_score": a.technical_accuracy_score,
-            "communication_score": a.communication_score,
-            "completeness_score": a.completeness_score,
-        })
-    
+        scores.append(
+            {
+                "relevance_score": a.relevance_score,
+                "technical_accuracy_score": a.technical_accuracy_score,
+                "communication_score": a.communication_score,
+                "completeness_score": a.completeness_score,
+            }
+        )
+
     return {
         "session": session,
         "questions": question_texts,

@@ -5,8 +5,12 @@ from sqlalchemy.orm import Session
 from typing import List, Optional
 
 from app.core.schemas import (
-    JobAnalysisCreate, JobAnalysisRequest, JobAnalysisResponse,
-    JobMatchCreate, JobMatchResponse, ApiResponse
+    JobAnalysisCreate,
+    JobAnalysisRequest,
+    JobAnalysisResponse,
+    JobMatchCreate,
+    JobMatchResponse,
+    ApiResponse,
 )
 from app.core.auth import get_current_user
 from app.database import get_db, JobAnalysis, JobMatch
@@ -17,13 +21,36 @@ router = APIRouter(prefix="/v1/jobs", tags=["jobs"])
 
 job_analysis_service = JobAnalysisService(
     api_key=os.getenv("GEMINI_API_KEY", ""),
-    model=os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
+    model=os.getenv("GEMINI_MODEL", "gemini-1.5-flash"),
 )
 
 skill_matching_service = SkillMatchingService(
     api_key=os.getenv("GEMINI_API_KEY", ""),
-    model=os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
+    model=os.getenv("GEMINI_MODEL", "gemini-1.5-flash"),
 )
+
+
+def _get_job_analysis_dict(job_analysis) -> dict:
+    """Convert SQLAlchemy JobAnalysis model to dict."""
+    return {
+        "required_skills": job_analysis.required_skills or [],
+        "preferred_skills": job_analysis.preferred_skills or [],
+        "matched_skills": job_analysis.matched_skills or [],
+        "missing_skills": job_analysis.missing_skills or [],
+        "recommendations": job_analysis.recommendations or [],
+        "analysis_json": job_analysis.analysis_json or {},
+    }
+
+
+def _get_job_match_dict(job_match) -> dict:
+    """Convert SQLAlchemy JobMatch model to dict."""
+    return {
+        "compatibility_score": job_match.compatibility_score,
+        "matched_skills": job_match.matched_skills or [],
+        "missing_skills": job_match.missing_skills or [],
+        "recommendations": job_match.recommendations or [],
+        "match_json": job_match.match_json or {},
+    }
 
 
 @router.post("/analyze", response_model=JobAnalysisResponse, summary="Analyze job description")
@@ -38,13 +65,13 @@ async def analyze_job(
         analysis = job_analysis_service.analyze(
             job_description=job_data.job_description,
             job_title=job_data.job_title,
-            company_name=job_data.company_name
+            company_name=job_data.company_name,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"AI analysis error: {str(e)}")
-    
+
     # Save to database
     job_analysis = JobAnalysis(
         user_id=user["id"],
@@ -61,7 +88,7 @@ async def analyze_job(
     db.add(job_analysis)
     db.commit()
     db.refresh(job_analysis)
-    
+
     return job_analysis
 
 
@@ -74,7 +101,7 @@ async def list_job_analyses(
 ):
     """List all job analyses belonging to the current user."""
     analyses = db.query(JobAnalysis).filter(
-        JobAnalysis.user_id == user["id"]
+        JobAnalysis.user_id == user["id"],
     ).offset(skip).limit(limit).all()
     return analyses
 
@@ -89,42 +116,38 @@ async def match_resume_to_job(
     # Verify resume ownership
     resume = db.query(Resume).filter(
         Resume.id == match_data.resume_id,
-        Resume.user_id == user["id"]
+        Resume.user_id == user["id"],
     ).first()
     if not resume:
         raise HTTPException(status_code=404, detail="Resume not found")
-    
+
     # Verify job analysis ownership
     job_analysis = db.query(JobAnalysis).filter(
         JobAnalysis.id == match_data.job_analysis_id,
-        JobAnalysis.user_id == user["id"]
+        JobAnalysis.user_id == user["id"],
     ).first()
     if not job_analysis:
         raise HTTPException(status_code=404, detail="Job analysis not found")
-    
+
     # Get resume text for matching
     resume_text = resume.extracted_text or ""
     if not resume_text or not resume_text.strip():
         raise HTTPException(
             status_code=400,
-            detail="Resume has no extracted text. Please ensure the resume has been analyzed."
+            detail="Resume has no extracted text. Please ensure the resume has been analyzed.",
         )
-    
+
     # Perform skill matching
     try:
         match_result = skill_matching_service.match(
             resume_text=resume_text,
-            job_analysis=job_analysis.model_dump() if hasattr(job_analysis, 'model_dump') 
-            else {k: getattr(job_analysis, k) for k in [
-                'required_skills', 'preferred_skills', 'matched_skills', 
-                'missing_skills', 'recommendations', 'analysis_json'
-            ]}
+            job_analysis=_get_job_analysis_dict(job_analysis),
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"AI matching error: {str(e)}")
-    
+
     # Save match to database
     job_match = JobMatch(
         user_id=user["id"],
@@ -139,5 +162,5 @@ async def match_resume_to_job(
     db.add(job_match)
     db.commit()
     db.refresh(job_match)
-    
+
     return job_match

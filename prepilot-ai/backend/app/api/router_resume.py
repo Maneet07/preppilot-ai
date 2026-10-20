@@ -1,24 +1,28 @@
 import os
-import shutil
+import logging
+from pathlib import Path
 from fastapi import APIRouter, UploadFile, File, HTTPException, Depends, BackgroundTasks
 from sqlalchemy.orm import Session
 from typing import List
 
 from app.core.schemas import (
-    ResumeUpload, ResumeResponse, ResumeAnalysisRequest, ResumeAnalysisResponse,
-    ApiResponse
+    ResumeUpload,
+    ResumeResponse,
+    ResumeAnalysisRequest,
+    ResumeAnalysisResponse,
+    ApiResponse,
 )
 from app.core.auth import get_current_user
 from app.database import get_db, Resume, ResumeAnalysis
 from app.services.resume_analysis import ResumeAnalysisService
-from app.core.config import UPLOAD_DIR
+from app.core.config import UPLOAD_DIR, MAX_UPLOAD_SIZE, ALLOWED_EXTENSIONS
 
 router = APIRouter(prefix="/v1/resumes", tags=["resumes"])
 
 # Initialize service
 resume_service = ResumeAnalysisService(
     api_key=os.getenv("GEMINI_API_KEY", ""),
-    model=os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
+    model=os.getenv("GEMINI_MODEL", "gemini-1.5-flash"),
 )
 
 
@@ -41,28 +45,27 @@ async def upload_resume(
 ):
     """Upload a resume file (PDF or DOCX) and extract text."""
     # Validate file type
-    allowed_extensions = [".pdf", ".docx"]
     file_ext = os.path.splitext(file.filename)[1].lower()
-    if file_ext not in allowed_extensions:
+    if file_ext not in ALLOWED_EXTENSIONS:
         raise HTTPException(
             status_code=400,
-            detail=f"Invalid file type. Allowed: {', '.join(allowed_extensions)}"
+            detail=f"Invalid file type. Allowed: {', '.join(ALLOWED_EXTENSIONS)}",
         )
 
     # Validate file size
-    max_size = int(os.getenv("MAX_UPLOAD_SIZE", "10485760"))  # 10MB
+    max_size = MAX_UPLOAD_SIZE
     file_content = await file.read()
     if len(file_content) > max_size:
         raise HTTPException(
             status_code=400,
-            detail=f"File too large. Maximum size: {max_size // (1024*1024)}MB"
+            detail=f"File too large. Maximum size: {max_size // (1024*1024)}MB",
         )
 
-    # Save file
+    # Save file to Supabase Storage path
     storage_path = f"resumes/{user['id']}/{file.filename}"
-    upload_dir = Path(UPLOAD_DIR)
-    upload_dir.mkdir(parents=True, exist_ok=True)
-    file_path = upload_dir / storage_path.lstrip("/")
+    file_path = UPLOAD_DIR / storage_path.lstrip("/")
+
+    # Ensure directory exists
     file_path.parent.mkdir(parents=True, exist_ok=True)
 
     with open(file_path, "wb") as f:
@@ -101,7 +104,7 @@ async def get_resume(
     """Get a specific resume by ID (ownership validated)."""
     resume = db.query(Resume).filter(
         Resume.id == resume_id,
-        Resume.user_id == user["id"]
+        Resume.user_id == user["id"],
     ).first()
     if not resume:
         raise HTTPException(status_code=404, detail="Resume not found")
@@ -117,7 +120,7 @@ async def delete_resume(
     """Delete a resume and its associated analysis."""
     resume = db.query(Resume).filter(
         Resume.id == resume_id,
-        Resume.user_id == user["id"]
+        Resume.user_id == user["id"],
     ).first()
     if not resume:
         raise HTTPException(status_code=404, detail="Resume not found")
@@ -130,7 +133,7 @@ async def delete_resume(
     # Delete physical file
     if resume.storage_path:
         try:
-            file_path = Path(UPLOAD_DIR) / resume.storage_path.lstrip("/")
+            file_path = UPLOAD_DIR / resume.storage_path.lstrip("/")
             if file_path.exists():
                 file_path.unlink()
         except Exception:
@@ -150,7 +153,7 @@ async def analyze_resume(
     # Verify resume ownership
     resume = db.query(Resume).filter(
         Resume.id == resume_id,
-        Resume.user_id == user["id"]
+        Resume.user_id == user["id"],
     ).first()
     if not resume:
         raise HTTPException(status_code=404, detail="Resume not found")
@@ -158,7 +161,7 @@ async def analyze_resume(
     # Check if already analyzed
     existing = db.query(ResumeAnalysis).filter(
         ResumeAnalysis.resume_id == resume_id,
-        ResumeAnalysis.user_id == user["id"]
+        ResumeAnalysis.user_id == user["id"],
     ).first()
     if existing:
         return existing
@@ -183,7 +186,7 @@ async def analyze_resume(
     if not extracted_text or not extracted_text.strip():
         raise HTTPException(
             status_code=400,
-            detail="No extractable text found in resume. The file may be encrypted, scanned, or corrupted."
+            detail="No extractable text found in resume. The file may be encrypted, scanned, or corrupted.",
         )
 
     # Analyze with Gemini
@@ -199,12 +202,12 @@ async def analyze_resume(
         user_id=user["id"],
         resume_id=resume_id,
         overall_score=analysis.overall_score,
-        strengths=strengths if isinstance(strengths, list) else [],
-        weaknesses=weaknesses if isinstance(weaknesses, list) else [],
-        identified_skills=identified_skills if isinstance(identified_skills, list) else [],
-        missing_skills=missing_skills if isinstance(missing_skills, list) else [],
-        improvement_suggestions=improvement_suggestions if isinstance(improvement_suggestions, list) else [],
-        analysis_json=analysis_json if isinstance(analysis_json, dict) else {},
+        strengths=analysis.strengths if isinstance(analysis.strengths, list) else [],
+        weaknesses=analysis.weaknesses if isinstance(analysis.weaknesses, list) else [],
+        identified_skills=analysis.identified_skills if isinstance(analysis.identified_skills, list) else [],
+        missing_skills=analysis.missing_skills if isinstance(analysis.missing_skills, list) else [],
+        improvement_suggestions=analysis.improvement_suggestions if isinstance(analysis.improvement_suggestions, list) else [],
+        analysis_json=analysis.model_dump() if hasattr(analysis, 'model_dump') else {},
     )
     db.add(analysis_record)
     db.commit()

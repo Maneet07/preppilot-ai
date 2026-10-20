@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from typing import List
+from datetime import datetime
 
 from app.core.schemas import ProfileCreate, ProfileUpdate, ProfileResponse, ApiResponse
 from app.core.auth import get_current_user
@@ -14,15 +15,15 @@ async def get_profile(
     user: dict = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Get the current user's profile."""
-    # Look up profile by user ID
+    """Get the current user's profile.
+    
+    Look up profile by Supabase Auth user UUID.
+    """
+    # Look up profile by user UUID from Supabase Auth
     profile = db.query(Profile).filter(Profile.id == user["id"]).first()
     if not profile:
         # Create a basic profile if none exists
-        profile = Profile(
-            id=user["id"],
-            email=user.get("email", ""),
-        )
+        profile = Profile(id=user["id"], email=user.get("email", ""))
         db.add(profile)
         db.commit()
         db.refresh(profile)
@@ -35,7 +36,10 @@ async def update_profile(
     user: dict = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Update the current user's profile."""
+    """Update the current user's profile.
+    
+    Only allow updating own profile - ownership fields cannot be changed.
+    """
     profile = db.query(Profile).filter(Profile.id == user["id"]).first()
     if not profile:
         profile = Profile(id=user["id"], email=user.get("email", ""))
@@ -43,6 +47,9 @@ async def update_profile(
     
     update_dict = profile_data.model_dump(exclude_unset=True)
     for key, value in update_dict.items():
+        # Prevent changing ownership fields
+        if key in ("id", "user_id", "created_at"):
+            continue
         setattr(profile, key, value)
     
     profile.updated_at = datetime.now(profile.updated_at.tzinfo) if profile.updated_at else datetime.now()
