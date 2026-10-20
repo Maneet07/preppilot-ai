@@ -1,0 +1,13 @@
+fastapi==0.110.0
+uvicorn[standard]==0.27.0
+sqlalchemy==2.0.29
+alembic==1.12.0
+google-genai==1.6.0
+pymupdf==1.24.1
+python-docx==1.2.1
+pytest==8.0.0
+httpx==0.25.2
+pydantic==2.7.4
+python-dotenv==1.0.0
+passlib[bcrypt]==1.5.3
+email-validator==2.1.0
