@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from typing import List
+from app.core.auth import get_current_user
 
 from app.core.schemas import ApiResponse, ReportResponse
 from app.database import get_db, ResumeAnalysis, JobAnalysis, InterviewSession

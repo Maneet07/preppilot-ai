@@ -7,7 +7,10 @@ from sqlalchemy.sql import column, table
 
 # Add project root to path
 import sys
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+import os
+# The env.py is at <project>/backend/alembic/env.py, so go up 2 levels to get to <project>/backend
+backend_dir = os.path.dirname(os.path.dirname(__file__))
+sys.path.insert(0, backend_dir)
 
 # Import Base and models
 from app.database import Base

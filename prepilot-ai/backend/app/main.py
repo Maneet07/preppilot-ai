@@ -2,7 +2,28 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 
-from app.core.config import settings
+from app.core.config import (
+    ENVIRONMENT,
+    HOST,
+    PORT,
+    DEBUG,
+    SECRET_KEY,
+    ALGORITHM,
+    ACCESS_TOKEN_EXPIRE_MINUTES,
+    GEMINI_API_KEY,
+    GEMINI_MODEL,
+    GEMINI_API_URL,
+    SUPABASE_URL,
+    SUPABASE_PUBLISHABLE_KEY,
+    SUPABASE_SERVICE_ROLE_KEY,
+    SUPABASE_JWT_SECRET,
+    DATABASE_URL,
+    FRONTEND_ORIGIN,
+    ALLOWED_ORIGINS,
+    UPLOAD_DIR,
+    MAX_UPLOAD_SIZE,
+    ALLOWED_EXTENSIONS,
+)
 from app.api.router_profile import router as profile_router
 from app.api.router_resume import router as resume_router
 from app.api.router_job import router as job_router
@@ -34,7 +55,7 @@ app = FastAPI(
 # CORS configuration
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.ALLOWED_ORIGINS,
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

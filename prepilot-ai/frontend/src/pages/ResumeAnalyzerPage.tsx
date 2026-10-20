@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { Loader2, Upload, FileText, Folder, LogOut } from "lucide-react";
-import { supabase } from "../../lib/supabase";
-import "index.css";
+import { supabase } from "../lib/supabase";
 
 interface ResumeUploadResponse {
   id: number;

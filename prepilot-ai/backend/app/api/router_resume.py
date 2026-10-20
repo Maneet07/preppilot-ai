@@ -11,7 +11,7 @@ from app.core.schemas import (
 from app.core.auth import get_current_user
 from app.database import get_db, Resume, ResumeAnalysis
 from app.services.resume_analysis import ResumeAnalysisService
-from app.core.config import settings
+from app.core.config import UPLOAD_DIR
 
 router = APIRouter(prefix="/v1/resumes", tags=["resumes"])
 
@@ -60,7 +60,7 @@ async def upload_resume(
 
     # Save file
     storage_path = f"resumes/{user['id']}/{file.filename}"
-    upload_dir = Path(settings.UPLOAD_DIR)
+    upload_dir = Path(UPLOAD_DIR)
     upload_dir.mkdir(parents=True, exist_ok=True)
     file_path = upload_dir / storage_path.lstrip("/")
     file_path.parent.mkdir(parents=True, exist_ok=True)
@@ -130,7 +130,7 @@ async def delete_resume(
     # Delete physical file
     if resume.storage_path:
         try:
-            file_path = Path(settings.UPLOAD_DIR) / resume.storage_path.lstrip("/")
+            file_path = Path(UPLOAD_DIR) / resume.storage_path.lstrip("/")
             if file_path.exists():
                 file_path.unlink()
         except Exception:
